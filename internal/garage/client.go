@@ -153,7 +153,7 @@ func (c *HTTPClient) AllowBucketKey(ctx context.Context, bucketID, accessKeyID s
 	req := allowBucketKeyRequest{
 		BucketID:    bucketID,
 		AccessKeyID: accessKeyID,
-		Permissions: bucketKeyPerm{Read: perms.Read, Write: perms.Write, Owner: perms.Owner},
+		Permissions: bucketKeyPerm(perms),
 	}
 	return c.do(ctx, http.MethodPost, "/v2/AllowBucketKey", nil, req, nil)
 }
@@ -186,7 +186,7 @@ func (c *HTTPClient) do(ctx context.Context, method, path string, query url.Valu
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	payload, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return err
