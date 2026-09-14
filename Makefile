@@ -1,7 +1,7 @@
 .PHONY: build build-linux release lint vuln check
 
 VERSION ?= dev
-LDFLAGS := -s -w
+LDFLAGS := -s -w -X github.com/ZachTech-HomeLab/vault-plugin-secrets-garage/internal/buildinfo.version=$(VERSION)
 BIN := .
 
 build:

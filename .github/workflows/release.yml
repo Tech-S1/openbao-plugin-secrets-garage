@@ -19,6 +19,9 @@ jobs:
     uses: Tech-S1/ci-templates/.github/workflows/go-release.yml@v0.2.0
     with:
       ref: ${{ github.event.workflow_run.head_sha }}
+      binary-package: .
+      binary-name: openbao-plugin-secrets-garage
+      ldflags-package: github.com/ZachTech-HomeLab/vault-plugin-secrets-garage/internal/buildinfo
     permissions:
       contents: write
       issues: write
