@@ -27,12 +27,12 @@ func configValidationError(err error) *logical.Response {
 			}
 		}
 	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return logical.ErrorResponse("timed out connecting to Garage at the configured address")
+	}
 	var netErr net.Error
 	if errors.As(err, &netErr) {
 		return logical.ErrorResponse("cannot reach Garage at the configured address: %v", err)
-	}
-	if errors.Is(err, context.DeadlineExceeded) {
-		return logical.ErrorResponse("timed out connecting to Garage at the configured address")
 	}
 	return logical.ErrorResponse("failed to validate Garage connection: %v", err)
 }
@@ -50,4 +50,19 @@ func bucketValidationError(err error, bucket string) (*logical.Response, error) 
 		}
 	}
 	return nil, fmt.Errorf("GetBucketInfo: %w", err)
+}
+
+func provisionValidationError(err error, bucket string) (*logical.Response, error) {
+	if err == nil {
+		return nil, nil
+	}
+	if apiErr, ok := garage.AsAPIError(err); ok {
+		if apiErr.StatusCode == http.StatusNotFound && apiErr.Path == "/v2/GetBucketInfo" {
+			return logical.ErrorResponse("bucket %q does not exist in Garage", bucket), nil
+		}
+		if apiErr.StatusCode >= 400 && apiErr.StatusCode < 500 {
+			return logical.ErrorResponse("failed to provision Garage credentials: %s", apiErr.Message), nil
+		}
+	}
+	return nil, err
 }

@@ -32,7 +32,7 @@ bao secrets enable -path=garage openbao-plugin-secrets-garage
 
 - OpenBao with external plugin support
 - Garage cluster with the Admin API reachable from OpenBao
-- Garage admin bearer token with permission to create and delete access keys
+- Garage admin bearer token with permission to list keys, read bucket info, and create/update/delete access keys
 
 
 
@@ -58,7 +58,7 @@ bao write garage/roles/myapp \
 bao read garage/creds/myapp
 ```
 
-Returned credentials include `access_key_id`, `secret_access_key`, `expiration`, and `bucket`. The Garage key is deleted when the lease is revoked or expires. Renew extends the Garage key expiration to match the new lease.
+Returned credentials include `access_key_id`, `secret_access_key`, `expiration`, and `bucket`. The Garage key is deleted when the lease is revoked or expires. Renew extends the Garage key expiration to match the renewed lease duration (capped by remaining max TTL and system max lease TTL).
 
 ## Config
 

@@ -148,6 +148,61 @@ func TestResolveTTL(t *testing.T) {
 	}
 }
 
+func TestRenewLeaseTTL(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC)
+	secret := &logical.Secret{}
+	secret.IssueTime = now.Add(-14 * time.Minute)
+	secret.Increment = 10 * time.Minute
+
+	ttl, maxTTL := renewLeaseTTL(secret, 5*time.Minute, 15*time.Minute, now)
+	require.Equal(t, time.Minute, ttl)
+	require.Equal(t, 15*time.Minute, maxTTL)
+
+	ttl, maxTTL = renewLeaseTTL(&logical.Secret{}, 5*time.Minute, 15*time.Minute, now)
+	require.Equal(t, 5*time.Minute, ttl)
+	require.Equal(t, 15*time.Minute, maxTTL)
+}
+
+func TestClampLeaseTTLs(t *testing.T) {
+	t.Parallel()
+
+	cfg := logical.TestBackendConfig()
+	cfg.System = &logical.StaticSystemView{
+		DefaultLeaseTTLVal: time.Hour,
+		MaxLeaseTTLVal:     2 * time.Minute,
+	}
+	b, err := Factory(context.Background(), cfg)
+	require.NoError(t, err)
+
+	ttl, maxTTL := b.(*Backend).clampLeaseTTLs(10*time.Minute, 15*time.Minute)
+	require.Equal(t, 2*time.Minute, ttl)
+	require.Equal(t, 2*time.Minute, maxTTL)
+}
+
+func TestProvisionValidationError(t *testing.T) {
+	t.Parallel()
+
+	resp, err := provisionValidationError(&garage.APIError{
+		Path:       "/v2/GetBucketInfo",
+		StatusCode: http.StatusNotFound,
+		Message:    "missing",
+	}, "my-bucket")
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Contains(t, resp.Error().Error(), `bucket "my-bucket" does not exist`)
+
+	resp, err = provisionValidationError(&garage.APIError{
+		Path:       "/v2/CreateKey",
+		StatusCode: http.StatusBadRequest,
+		Message:    "bad key",
+	}, "my-bucket")
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.Contains(t, resp.Error().Error(), "failed to provision Garage credentials")
+}
+
 func TestConfigValidationError(t *testing.T) {
 	t.Parallel()
 
@@ -174,7 +229,7 @@ func TestConfigValidationError(t *testing.T) {
 		{
 			name:    "deadline exceeded",
 			err:     context.DeadlineExceeded,
-			wantErr: "cannot reach Garage",
+			wantErr: "timed out connecting to Garage",
 		},
 		{
 			name:    "generic error",

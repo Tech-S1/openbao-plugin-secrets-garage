@@ -80,3 +80,41 @@ func resolveTTL(roleTTL, roleMaxTTL, cfgDefaultTTL, cfgMaxTTL time.Duration) (tt
 	}
 	return ttl, maxTTL
 }
+
+func (b *Backend) clampLeaseTTLs(ttl, maxTTL time.Duration) (time.Duration, time.Duration) {
+	if sys := b.System(); sys != nil {
+		if sysMax := sys.MaxLeaseTTL(); sysMax > 0 {
+			if maxTTL == 0 || maxTTL > sysMax {
+				maxTTL = sysMax
+			}
+			if ttl > sysMax {
+				ttl = sysMax
+			}
+		}
+	}
+	if maxTTL > 0 && ttl > maxTTL {
+		ttl = maxTTL
+	}
+	return ttl, maxTTL
+}
+
+func renewLeaseTTL(secret *logical.Secret, snapshotTTL, snapshotMaxTTL time.Duration, now time.Time) (ttl, maxTTL time.Duration) {
+	maxTTL = snapshotMaxTTL
+	ttl = snapshotTTL
+	if secret != nil && secret.Increment > 0 {
+		ttl = secret.Increment
+	}
+	if maxTTL > 0 && secret != nil && !secret.IssueTime.IsZero() {
+		remaining := maxTTL - now.Sub(secret.IssueTime)
+		if remaining < 0 {
+			remaining = 0
+		}
+		if ttl > remaining {
+			ttl = remaining
+		}
+	}
+	if maxTTL > 0 && ttl > maxTTL {
+		ttl = maxTTL
+	}
+	return ttl, maxTTL
+}
