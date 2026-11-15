@@ -20,6 +20,6 @@ permissions:
 
 jobs:
   go:
-    uses: Tech-S1/ci-templates/.github/workflows/go-ci.yml@ee9c56d0ed5c68d91e4f67cfa27cb884444edfff # v0.2.2
+    uses: Tech-S1/ci-templates/.github/workflows/go-ci.yml@1855d5a3ad7ac87cb4b683aed176c50c691beaf6 # v0.2.4
     with:
       build-packages: .
