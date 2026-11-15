@@ -2,11 +2,13 @@ package garagetest
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 const (
@@ -25,11 +27,14 @@ type Server struct {
 	AllowBucketKeyStatus int
 	CreateKeyStatus      int
 	UpdateKeyStatus      int
+	DeleteKeyStatus      int
 	Buckets              map[string]string
 	Keys                 map[string]string
 
 	CreateKeyCalls      int
 	AllowBucketKeyCalls int
+	LastCreateKeyExp    time.Time
+	LastUpdateKeyExp    time.Time
 
 	DeleteKeyCalls     atomic.Int32
 	DeleteKeyFailCount atomic.Int32
@@ -96,9 +101,15 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 			ID string `json:"id"`
 		}{ID: id})
 	case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/v2/CreateKey"):
+		raw, _ := io.ReadAll(r.Body)
+		var req struct {
+			Expiration time.Time `json:"expiration"`
+		}
+		_ = json.Unmarshal(raw, &req)
 		s.mu.Lock()
 		status := s.CreateKeyStatus
 		s.CreateKeyCalls++
+		s.LastCreateKeyExp = req.Expiration
 		s.mu.Unlock()
 		if status != 0 && status != http.StatusOK {
 			http.Error(w, "create failed", status)
@@ -128,8 +139,15 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		}
 		w.WriteHeader(http.StatusOK)
 	case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/v2/DeleteKey"):
+		s.mu.Lock()
+		status := s.DeleteKeyStatus
+		s.mu.Unlock()
 		attempt := s.DeleteKeyFailCount.Add(1)
 		s.DeleteKeyCalls.Add(1)
+		if status != 0 && status != http.StatusOK {
+			http.Error(w, "delete failed", status)
+			return
+		}
 		if attempt <= s.DeleteKeyFailUntil.Load() {
 			http.Error(w, "server error", http.StatusInternalServerError)
 			return
@@ -140,8 +158,14 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		s.mu.Unlock()
 		w.WriteHeader(http.StatusOK)
 	case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/v2/UpdateKey"):
+		raw, _ := io.ReadAll(r.Body)
+		var req struct {
+			Expiration time.Time `json:"expiration"`
+		}
+		_ = json.Unmarshal(raw, &req)
 		s.mu.Lock()
 		status := s.UpdateKeyStatus
+		s.LastUpdateKeyExp = req.Expiration
 		s.mu.Unlock()
 		if status != 0 && status != http.StatusOK {
 			http.Error(w, "update failed", status)

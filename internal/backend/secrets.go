@@ -62,11 +62,11 @@ func (b *Backend) secretRenew(ctx context.Context, req *logical.Request, _ *fram
 	if cfg == nil {
 		return nil, fmt.Errorf("garage is not configured")
 	}
-	ttl, err := snapshotDuration(req.Secret.InternalData, "ttl")
+	snapshotTTL, err := snapshotDuration(req.Secret.InternalData, "ttl")
 	if err != nil {
 		return nil, err
 	}
-	maxTTL, err := snapshotDuration(req.Secret.InternalData, "max_ttl")
+	snapshotMaxTTL, err := snapshotDuration(req.Secret.InternalData, "max_ttl")
 	if err != nil {
 		return nil, err
 	}
@@ -74,7 +74,13 @@ func (b *Backend) secretRenew(ctx context.Context, req *logical.Request, _ *fram
 	if err != nil {
 		return nil, err
 	}
-	if err := client.UpdateKey(ctx, id, time.Now().UTC().Add(ttl)); err != nil {
+	now := time.Now().UTC()
+	ttl, maxTTL := renewLeaseTTL(req.Secret, snapshotTTL, snapshotMaxTTL, now)
+	ttl, maxTTL = b.clampLeaseTTLs(ttl, maxTTL)
+	if ttl <= 0 {
+		return logical.ErrorResponse("lease cannot be renewed further"), nil
+	}
+	if err := client.UpdateKey(ctx, id, now.Add(ttl)); err != nil {
 		return nil, fmt.Errorf("UpdateKey: %w", err)
 	}
 	resp := &logical.Response{Secret: req.Secret}

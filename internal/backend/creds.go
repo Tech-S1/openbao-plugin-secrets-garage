@@ -44,9 +44,13 @@ func (b *Backend) credsRead(ctx context.Context, req *logical.Request, d *framew
 		return logical.ErrorResponse("garage is not configured"), nil
 	}
 	ttl, maxTTL := resolveTTL(role.TTL, role.MaxTTL, cfg.DefaultTTL, cfg.MaxTTL)
+	ttl, maxTTL = b.clampLeaseTTLs(ttl, maxTTL)
 	expiration := time.Now().UTC().Add(ttl)
 	key, err := b.provisionKey(ctx, client, role, name, expiration)
 	if err != nil {
+		if resp, respErr := provisionValidationError(err, role.Bucket); resp != nil || respErr != nil {
+			return resp, respErr
+		}
 		return nil, err
 	}
 	resp := b.Secret(secretType).Response(map[string]interface{}{

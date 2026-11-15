@@ -20,13 +20,19 @@ func (b *Backend) provisionKey(ctx context.Context, client garage.Client, role *
 	}
 	bucket, err := client.GetBucketInfo(ctx, role.Bucket)
 	if err != nil {
-		_ = client.DeleteKey(ctx, key.AccessKeyID)
+		b.rollbackKey(ctx, client, key.AccessKeyID)
 		return nil, fmt.Errorf("GetBucketInfo: %w", err)
 	}
 	perms := garage.Permissions{Read: role.Read, Write: role.Write, Owner: role.Owner}
 	if err := client.AllowBucketKey(ctx, bucket.ID, key.AccessKeyID, perms); err != nil {
-		_ = client.DeleteKey(ctx, key.AccessKeyID)
+		b.rollbackKey(ctx, client, key.AccessKeyID)
 		return nil, fmt.Errorf("AllowBucketKey: %w", err)
 	}
 	return key, nil
+}
+
+func (b *Backend) rollbackKey(ctx context.Context, client garage.Client, accessKeyID string) {
+	if err := client.DeleteKey(ctx, accessKeyID); err != nil {
+		b.Logger().Error("failed to roll back garage key", "access_key_id", accessKeyID, "error", err)
+	}
 }

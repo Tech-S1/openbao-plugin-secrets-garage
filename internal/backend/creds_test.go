@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ZachTech-HomeLab/vault-plugin-secrets-garage/internal/backend"
 	"github.com/ZachTech-HomeLab/vault-plugin-secrets-garage/internal/garage/garagetest"
 	"github.com/openbao/openbao/sdk/v2/logical"
 	"github.com/stretchr/testify/require"
@@ -205,6 +206,108 @@ func TestSecretRenewUsesSnapshotAfterRoleDelete(t *testing.T) {
 	require.NotNil(t, renew.Secret)
 	require.Equal(t, 300*time.Second, renew.Secret.TTL)
 	require.Equal(t, 15*time.Minute, renew.Secret.MaxTTL)
+}
+
+func TestSecretRenewCapsToRemainingMaxTTL(t *testing.T) {
+	t.Parallel()
+
+	f := setupCredsFixture(t)
+	issue := f.issueCreds(t, "app")
+	issue.Secret.IssueTime = time.Now().UTC().Add(-14 * time.Minute)
+	issue.Secret.Increment = 10 * time.Minute
+
+	before := time.Now().UTC()
+	renew, err := f.Backend.HandleRequest(context.Background(), &logical.Request{
+		Operation: logical.RenewOperation,
+		Storage:   f.Storage,
+		Secret:    issue.Secret,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, renew)
+	require.LessOrEqual(t, renew.Secret.TTL, 75*time.Second)
+	require.Greater(t, renew.Secret.TTL, time.Duration(0))
+
+	exp := f.Garage.LastUpdateKeyExp
+	require.False(t, exp.IsZero())
+	require.WithinDuration(t, before.Add(renew.Secret.TTL), exp, 2*time.Second)
+}
+
+func TestCredsCapsTTLToSystemMax(t *testing.T) {
+	t.Parallel()
+
+	g := garagetest.New()
+	t.Cleanup(g.Close)
+	g.AddBucket("my-bucket", "bucket-id-1")
+
+	cfg := logical.TestBackendConfig()
+	cfg.System = &logical.StaticSystemView{
+		DefaultLeaseTTLVal: time.Hour,
+		MaxLeaseTTLVal:     90 * time.Second,
+	}
+	b, err := backend.Factory(context.Background(), cfg)
+	require.NoError(t, err)
+
+	f := &fixture{
+		Backend: b.(*backend.Backend),
+		Storage: &logical.InmemStorage{},
+		Garage:  g,
+	}
+	f.writeConfigOK(t)
+	resp := f.writeRole(t, "app", "my-bucket")
+	if resp != nil && resp.IsError() {
+		require.FailNow(t, "role write", resp.Error())
+	}
+
+	issued := f.issueCreds(t, "app")
+	require.Equal(t, int64(90), issued.Secret.InternalData["ttl"])
+	require.Equal(t, int64(90), issued.Secret.InternalData["max_ttl"])
+	require.WithinDuration(t, time.Now().UTC().Add(90*time.Second), f.Garage.LastCreateKeyExp, 2*time.Second)
+}
+
+func TestCredsMapsMissingBucketToErrorResponse(t *testing.T) {
+	t.Parallel()
+
+	f := setupCredsFixture(t)
+	require.NoError(t, f.Storage.Put(context.Background(), &logical.StorageEntry{
+		Key:   "roles/app",
+		Value: []byte(`{"bucket":"gone-bucket","read":true,"write":true,"ttl":300000000000}`),
+	}))
+
+	resp, err := f.requestErr(t, logical.ReadOperation, "creds/app", nil)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.True(t, resp.IsError())
+	require.Contains(t, resp.Error().Error(), `bucket "gone-bucket" does not exist`)
+}
+
+func TestCredsMapsClientErrorToErrorResponse(t *testing.T) {
+	t.Parallel()
+
+	f := setupCredsFixture(t)
+	f.Garage.CreateKeyStatus = http.StatusBadRequest
+
+	resp, err := f.requestErr(t, logical.ReadOperation, "creds/app", nil)
+	require.NoError(t, err)
+	require.NotNil(t, resp)
+	require.True(t, resp.IsError())
+	require.Contains(t, resp.Error().Error(), "failed to provision Garage credentials")
+}
+
+func TestProvisionRollbackLogsDeleteFailure(t *testing.T) {
+	t.Parallel()
+
+	f := setupCredsFixture(t)
+	f.Garage.AllowBucketKeyStatus = 500
+	f.Garage.DeleteKeyStatus = http.StatusInternalServerError
+
+	_, err := f.Backend.HandleRequest(context.Background(), &logical.Request{
+		Operation: logical.ReadOperation,
+		Path:      "creds/app",
+		Storage:   f.Storage,
+	})
+	require.Error(t, err)
+	require.Equal(t, 1, f.Garage.CreateKeyCalls)
+	require.EqualValues(t, 1, f.Garage.DeleteKeyCalls.Load())
 }
 
 func TestSecretRenewRejectsInvalidSnapshot(t *testing.T) {
